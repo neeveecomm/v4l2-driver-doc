@@ -1,0 +1,41 @@
+= Video4Linux2(V4L2) Driver Training
+
+:toc:
+:icons: font
+
+== Introduction
+
+* Video4Linux2 (V4L2) is a Linux kernel framework that provides a unified API for interfacing with video capture and output devices such as webcams, TV tuners, and frame grabbers. It abstracts the complexities of hardware communication, offering a consistent and extensible interface for user-space applications to control and stream video data from supported devices.
+
+* As the successor to the original Video4Linux (V4L), V4L2 introduces improved support for a wider range of video formats, enhanced I/O methods (such as memory-mapped buffers and DMA), and a richer set of controls for fine-grained device configuration. These include capabilities to adjust resolution, frame rate, pixel format (e.g., YUYV, MJPEG, H.264), and streaming parameters via ioctl system calls.
+
+* V4L2 is tightly integrated with the Linux kernel and is part of the mainline distribution, eliminating the need for separate installation. It exposes device nodes (e.g., /dev/video0) through which applications can query capabilities, negotiate video formats, and capture or output video frames.
+
+* To facilitate development and debugging, V4L2 is supported by a suite of command-line utilities such as v4l2-ctl and qv4l2, which allow developers to inspect and manipulate device configurations interactively.
+
+* Popular multimedia frameworks and libraries such as GStreamer, OpenCV, and FFmpeg offer native support for V4L2 through dedicated plugins or APIs. This allows seamless integration of V4L2-based capture pipelines into real-time video processing, computer vision, and streaming applications.
+
+* Overall, V4L2 provides a stable and extensible foundation for building high-performance video applications on Linux platforms, with broad support from both the community and hardware vendors.
+
+== V4L2-Supported Devices
+
+V4L2 supports a wide range of video and multimedia devices, including but not limited to:
+
+. *Webcams:* USB-based webcams (UVC-compliant), Integrated laptop cameras, Industrial or machine vision USB cameras.
+
+. *TV Tuners & DVB Devices:* Analog TV capture cards (e.g., PCI/PCIe), Digital TV tuners (DVB-T, DVB-S, DVB-C), Radio capture devices (some support FM radio via V4L2).
+
+. *HDMI Capture Devices:* USB or PCIe HDMI grabbers (e.g., Elgato, Magewell, AVerMedia), Frame grabbers for embedded systems or media servers.
+
+. *Camera Sensor Interfaces:* CSI (Camera Serial Interface) or MIPI-CSI camera sensors (on embedded platforms like Raspberry Pi, NVIDIA Jetson, BeagleBone, etc.), Parallel interface camera sensors for older or custom boards.
+
+== V4L2-Use Cases
+
+    . Live Video Streaming: Capturing video from a webcam or HDMI source and streaming over RTSP, HTTP, or WebRTC, used in IP camera applications, home surveillance, and video conferencing
+
+    . Computer Vision and AI: Real-time video capture for object detection, tracking, OCR, or gesture recognition, used in robotics, smart retail, and autonomous systems.
+
+    . Industrial and Scientific Applications: Machine vision systems on production lines (e.g., defect detection), 
+
+    . Microscopy and lab imaging tools: Medical cameras (e.g., endoscopes or imaging sensors in diagnostics).
+

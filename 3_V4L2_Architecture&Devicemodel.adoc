@@ -1,0 +1,136 @@
+= V4L2 Architecture and Device Model
+
+// image::images\3_V4L3_Arch.png[Alt text]
+
+image::images\3_V4L3_Arch.png[Camera Flow Diagram, width=600, height=300]
+
+== V4L2 device node structure
+
+The V4L2 framework exposes hardware video functions to user space through character device nodes in the */dev/* filesystem. These device nodes represent specific video functions, such as capture, output, or metadata streams.
+
+[cols="3,3,6", options="header"]
+|===
+| Node               | Type                              | Description                                               
+| `/dev/videoX`      | **Main video interface**          | Used for video capture/output streams
+| `/dev/vbiX`        | **VBI (Vertical Blank Interval)** | Legacy analog data (e.g., closed captions)
+| `/dev/radioX`      | **Radio tuner**                   | FM radio support for hybrid devices
+| `/dev/mediaX`      | **Media Controller interface**    | Describes video pipeline topology (entities/links)
+| `/dev/v4l-subdevX` | **V4L2 Sub-device**               | Represents internal components (sensor, ISP, MIPI bridge)
+|===
+
+* media pipeline 
++
+[Camera Sensor] <==> [MIPI CSI Rx] <==> [CSI Bridge] <==> [ISI] <==> [ISP] <==> /dev/videox
+
+== Sub-devices and media controller framework
+
+* Subdevice
+
+. A sub-device is a kernel abstraction representing an individual hardware block in a video pipeline (e.g., camera sensor, MIPI CSI bridge, ISP).
+
+. These do not expose /dev/videoX interfaces directly.
+
+. Instead, they are registered via the V4L2 sub-device API (v4l2_subdev_ops) and linked together using the Media Controller framework.
+
++
+*Examples*
+
++
+[option="header"]
+|===
+| Sub-device   | Role
+| `imx415`     | I2C-based camera sensor
+| `mipi_csi2`  | MIPI CSI-2 receiver interface
+| `csi_bridge` | CSI-to-ISI video bridge
+| `isi`, `isp` | Image processing blocks (color, crop, scale)
+|===
+
+. Registered sub-devices are added to the media graph.
+
+. They expose capabilities like format negotiation, streaming control, sensor controls, etc.
+
+* Media Controller Framework
+
+. The Media Controller (MC) models the video subsystem as a graph of entities, each with pads (data endpoints), connected by links.
+
+. Used when the video path is configurable, not hardwired — common on SoCs like i.MX8MP, RK3399, AM62x, etc.
+
++
+* Key components
+
++
+|===
+| Term       | Description
+
+| **Entity** | Represents a functional hardware block (sensor, ISP, etc.)
+| **Pad**    | Input/output endpoint of an entity
+| **Link**   | Connection between two pads
+|===
+
+When the video pipeline is non-trivial (e.g., multiple sensors, ISPs, muxes), media controller allows:
+
+* Dynamic routing between blocks
+
+* Per-block configuration (e.g., resolution in the ISI vs sensor)
+
+* Sensor-specific controls without hardcoding
+
++
+To inspect media graph `media-ctl -p`
+
+* Output :
++
+[source,txt]
+----
+Media controller API version 6.6.84
+
+Media device information
+------------------------
+driver          uvcvideo
+model           USB Camera: USB Camera
+serial          SN0001
+bus info        usb-xhci-hcd.1.auto-1.2
+hw revision     0x100
+driver version  6.6.84
+
+Device topology
+- entity 1: USB Camera: USB Camera (1 pad, 1 link)
+            type Node subtype V4L flags 1
+            device node name /dev/video2
+        pad0: Sink
+                <- "Extension 3":1 [ENABLED,IMMUTABLE]
+
+- entity 4: USB Camera: USB Camera (0 pad, 0 link)
+            type Node subtype V4L flags 0
+            device node name /dev/video3
+
+- entity 8: Extension 3 (2 pads, 2 links, 0 routes)
+            type V4L2 subdev subtype Unknown flags 0
+        pad0: Sink
+                <- "Processing 2":1 [ENABLED,IMMUTABLE]
+        pad1: Source
+                -> "USB Camera: USB Camera":0 [ENABLED,IMMUTABLE]
+
+- entity 11: Processing 2 (2 pads, 2 links, 0 routes)
+             type V4L2 subdev subtype Unknown flags 0
+        pad0: Sink
+                <- "Camera 1":0 [ENABLED,IMMUTABLE]
+        pad1: Source
+                -> "Extension 3":0 [ENABLED,IMMUTABLE]
+
+- entity 14: Camera 1 (1 pad, 1 link, 0 routes)
+             type V4L2 subdev subtype Sensor flags 0
+        pad0: Source
+                -> "Processing 2":0 [ENABLED,IMMUTABLE]
+----
+
+== Summary :
+
+|===
+| Feature     | Sub-device                                      | Media Controller
+
+| Abstraction | Represents hardware block (sensor, bridge, ISP) | Represents video graph (blocks + connections)
+| Exposure    | Kernel-only (no `/dev` nodes)                   | User-visible via `/dev/mediaX`
+| Controls    | Format, streaming, exposure, gain, etc.         | Topology, pad format, routing
+| Tools       | N/A                                             | `media-ctl`
+|===
