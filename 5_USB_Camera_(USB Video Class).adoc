@@ -1,0 +1,403 @@
+= USB Camera (USB Video Class)
+
+== UVC-Compliant Devices Overview
+
+What is UVC?
+
+* UVC (USB Video Class) is a standardized USB device class specification defined by the USB Implementers Forum (USB-IF). It allows USB video devices (e.g., webcams, conference cameras, document scanners) to be used across platforms without requiring device-specific drivers.
+
+=== UVC-Compliant Device Characteristics
+
+|===
+| Feature                 | Description
+| **Interface Class**     | `0x0E` (Video class)
+| **Standard Protocol**   | Defined by UVC 1.0 – 1.5 (latest)
+| **Plug-and-play**       | No custom drivers needed on Linux, macOS, or Windows
+| **Control Support**     | Standardized video controls (brightness, contrast, exposure, etc.)
+| **Streaming Interface** | Isochronous or bulk video stream
+| **Descriptor Types**    | VideoControl and VideoStreaming descriptors
+| **Cross-platform**      | Supported natively in Linux kernel via `uvcvideo` driver
+|===
+
+* Typical UVC Devices
+. USB webcams
+. HDMI-to-USB capture cards
+. Medical imaging devices
+. Industrial USB cameras
+. Conference room PTZ cameras
+
+===  UVC Version Support
+
+|===
+| Version     | Features
+| **UVC 1.0** | Basic video streaming and control (webcams)
+| **UVC 1.1** | Added still image capture, better clock sync
+| **UVC 1.5** | Metadata header, H.264 support, vendor XU controls
+|===
+
+=== Linux Kernel Support
+|===
+| Component          | Status
+| **Kernel Driver**  | `uvcvideo.ko`
+| **V4L2 Interface** | Fully supported
+| **Subdev Entity**  | Exposed as `/dev/videoX`, `/dev/mediaX`
+| **Sysfs Info**     | `/sys/class/video4linux/videoX/`
+| **Udev-friendly**  | Auto-created nodes under `/dev/`
+|===
+
+=== Example: Detecting a UVC Camera
+
+Run the following command to list connected USB devices:
+
+`lsusb`
+
+Output:
+[source,shell]
+----
+Bus 001 Device 005: ID 0c45:6366 Microdia Webcam Vitade AF
+----
+
+=== Summary 
+
+|===
+| Feature              | Benefit
+
+| 🧩 UVC Standard      | Cross-platform compatibility
+| ⚙️ Built-in Driver   | No custom driver development
+| 🎛️ Control Support  | Unified API for brightness, gain, etc.
+| 🖥️ Media Controller | Visualizes UVC topology if enabled
+| 🧪 Tooling           | v4l2-ctl, media-ctl, ffmpeg, GStreamer work out of the box
+|===
+
+== UVC Device Architecture and Protocol
+
+* Objective
+
+Understand how a UVC-compliant USB camera is architected internally, how its interfaces, descriptors, and control paths are structured, and how Linux handles them via the uvcvideo driver and the media controller framework.
+
+=== UVC Interface Architecture
+
+|===
+| Interface Type          | Purpose
+| **VideoControl (VC)**   | Handles camera controls (e.g., exposure, brightness), clock, and interrupt events
+| **VideoStreaming (VS)** | Handles video frame transport and negotiation (formats, resolution, framerate)
+|===
+
+* UVC Descriptor Layout
+
+image::images\UVC.png[Camera Flow Diagram, width=600, height=300]
+
+* Data Flow (Streaming Path)
++
+[source,text]
+--
+[Camera Sensor]
+   ↓
+[Input Terminal] → [Processing Unit] → [Extension Unit] → [Output Terminal]
+   ↓
+[Input Header] → [Format/Frame Descriptor]
+   ↓
+USB Isochronous/Bulk IN endpoint
+   ↓
+→ Video Buffer → /dev/videoX (by uvcvideo driver)
+--
+
+----
+* Each video stream path is described in USB descriptors and mapped into media entities and pads by the kernel’s media controller framework.
+----
+
+* Example Output from `media-ctl -p`
++
+[source,shell]
+----
+Media controller API version 6.6.84
+
+Media device information
+------------------------
+driver          uvcvideo
+model           USB Camera: USB Camera
+serial          SN0001
+bus info        usb-xhci-hcd.1.auto-1.2
+hw revision     0x100
+driver version  6.6.84
+
+Device topology
+- entity 1: USB Camera: USB Camera (1 pad, 1 link)
+            type Node subtype V4L flags 1
+            device node name /dev/video2
+        pad0: Sink
+                <- "Extension 3":1 [ENABLED,IMMUTABLE]
+
+- entity 4: USB Camera: USB Camera (0 pad, 0 link)
+            type Node subtype V4L flags 0
+            device node name /dev/video3
+
+- entity 8: Extension 3 (2 pads, 2 links, 0 routes)
+            type V4L2 subdev subtype Unknown flags 0
+        pad0: Sink
+                <- "Processing 2":1 [ENABLED,IMMUTABLE]
+        pad1: Source
+                -> "USB Camera: USB Camera":0 [ENABLED,IMMUTABLE]
+
+- entity 11: Processing 2 (2 pads, 2 links, 0 routes)
+             type V4L2 subdev subtype Unknown flags 0
+        pad0: Sink
+                <- "Camera 1":0 [ENABLED,IMMUTABLE]
+        pad1: Source
+                -> "Extension 3":0 [ENABLED,IMMUTABLE]
+
+- entity 14: Camera 1 (1 pad, 1 link, 0 routes)
+             type V4L2 subdev subtype Sensor flags 0
+        pad0: Source
+                -> "Processing 2":0 [ENABLED,IMMUTABLE]
+----
+
++
+This shows:
++
+--
+* Entity 14: Camera sensor
+* Entity 11: Processing Unit
+* Entity 8: Extension Unit
+* Entity 1: Final V4L2 /dev/videoX node
+--
+
+=== UVC Protocol Layers
+
+|===
+| *Layer*            | *Function*
+| USB Bulk/Iso     | Transports video frames
+| UVC Descriptors  | Advertise supported resolutions, formats, controls
+| V4L2 Framework   | Maps descriptors to IOCTL interface
+| `uvcvideo.ko`    | Linux kernel driver handling control + streaming
+| Media Controller | Maps internal blocks for sub-device routing (optional)
+|===
+
+=== Control Interface
+
+* UVC devices expose controls via:
+
+=> UVC Standard Controls (brightness, contrast, gain, etc.)
+
+=> Vendor Extension Units (XU controls) for proprietary control
+
+=> Mapped to V4L2_CID_ IDs* or accessible via `v4l2-ctl`
+
+== UVC Device Enumeration and Descriptor Parsing
+
+=== Enumeration Overview
+
+When a UVC camera is plugged in, the following steps occur:
+
+. USB Core Enumerates the Device
++
+* Assigns USB address
+* Reads standard descriptors (device, configuration, interface, endpoint)
++
+. Class Driver Match
++
+* `usbcore` identifies it as a video class (0x0E)
+* Binds the `uvcvideo.ko` kernel module
++
+. Descriptor Parsing by `uvcvideo`
++
+* Parses VideoControl (VC) and VideoStreaming (VS) descriptors
+* Registers one or more V4L2 device nodes (e.g., `/dev/video2`)
++
+. V4L2 Interface Ready
++
+* Controls (brightness, contrast, etc.) mapped to V4L2_CID_* controls
+* Format/frame info exposed via `VIDIOC_ENUM_FMT`, `VIDIOC_ENUM_FRAMESIZES`, etc.
+
+=== Important Descriptors (Parsed by uvcvideo)
+
+|===
+| *Descriptor Type*           | *Purpose*
+| **VC Interface**          | Control: camera input, processing, extension units
+| **VS Interface**          | Streaming: supported formats/resolutions
+| **Class-Specific Header** | Links VC → VS interfaces
+| **Endpoint Descriptors**  | Define USB transfer type (isochronous/bulk)
+|===
+
+=== Query metadata:
+
+* `udevadm info --name=/dev/video2`
++
+[source,shell]
+----
+P: /devices/platform/soc@0/32f10108.usb/38200000.usb/xhci-hcd.1.auto/usb1/1-1/1-1.2/1-1.2:1.0/video4linux/video2
+M: video2                                                                                                                               
+R: 2                                                                                                                                    
+U: video4linux                                                                                                                          
+D: c 81:2                                                                                                                               
+N: video2                                                                                                                               
+L: 0                                                                                                                                    
+S: v4l/by-path/platform-xhci-hcd.1.auto-usb-0:1.2:1.0-video-index0                                                                      
+S: v4l/by-id/usb-Sonix_Technology_Co.__Ltd._USB_Camera_SN0001-video-index0                                                              
+S: v4l/by-path/platform-xhci-hcd.1.auto-usbv2-0:1.2:1.0-video-index0                                                                    
+E: DEVPATH=/devices/platform/soc@0/32f10108.usb/38200000.usb/xhci-hcd.1.auto/usb1/1-1/1-1.2/1-1.2:1.0/video4linux/video2                
+E: DEVNAME=/dev/video2                                                                                                                  
+E: MAJOR=81                                                                                                                             
+E: MINOR=2                                                                                                                              
+E: SUBSYSTEM=video4linux                                                                                                                
+E: USEC_INITIALIZED=10163058                                                                                                            
+E: ID_V4L_VERSION=2                                                                                                                     
+E: ID_V4L_PRODUCT=USB Camera: USB Camera                                                                                                
+E: ID_V4L_CAPABILITIES=:capture:                                                                                                        
+E: ID_BUS=usb                                                                                                                           
+E: ID_MODEL=USB_Camera
+E: ID_MODEL_ENC=USB\x20Camera
+E: ID_MODEL_ID=6366
+E: ID_SERIAL=Sonix_Technology_Co.__Ltd._USB_Camera_SN0001
+E: ID_SERIAL_SHORT=SN0001
+E: ID_VENDOR=Sonix_Technology_Co.__Ltd.
+E: ID_VENDOR_ENC=Sonix\x20Technology\x20Co.\x2c\x20Ltd.
+E: ID_VENDOR_ID=0c45
+E: ID_REVISION=0100
+E: ID_TYPE=video
+E: ID_USB_MODEL=USB_Camera
+E: ID_USB_MODEL_ENC=USB\x20Camera
+E: ID_USB_MODEL_ID=6366
+E: ID_USB_SERIAL=Sonix_Technology_Co.__Ltd._USB_Camera_SN0001
+E: ID_USB_SERIAL_SHORT=SN0001
+E: ID_USB_VENDOR=Sonix_Technology_Co.__Ltd.
+E: ID_USB_VENDOR_ENC=Sonix\x20Technology\x20Co.\x2c\x20Ltd.
+E: ID_USB_VENDOR_ID=0c45
+E: ID_USB_REVISION=0100
+E: ID_USB_TYPE=video
+E: ID_USB_INTERFACES=:0e0100:0e0200:
+E: ID_USB_INTERFACE_NUM=00
+E: ID_USB_DRIVER=uvcvideo
+E: ID_PATH_WITH_USB_REVISION=platform-xhci-hcd.1.auto-usbv2-0:1.2:1.0
+E: ID_PATH=platform-xhci-hcd.1.auto-usb-0:1.2:1.0
+E: ID_PATH_TAG=platform-xhci-hcd_1_auto-usb-0_1_2_1_0
+E: ID_FOR_SEAT=video4linux-platform-xhci-hcd_1_auto-usb-0_1_2_1_0
+E: DEVLINKS=/dev/v4l/by-path/platform-xhci-hcd.1.auto-usb-0:1.2:1.0-video-index0 /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._USB_Camera_SN0001-video-index0 /dev/v4l/by-path/platform-xhci-hcd.1.auto-usb>
+E: TAGS=:uaccess:seat:
+E: CURRENT_TAGS=:uaccess:seat:
+----
+
+=== 📐 Media Graph Layout
+
+* The uvcvideo driver auto-constructs a media topology using:
+
+. Entities: Sensor, Processing, Extension, Output
+. Pads and Links: Show data flow
+. Tools: `media-ctl -p`
+
+== 💻 Accessing USB/UVC Devices on Linux
+
+=== 🔎 1. Identifying the Device
+
+* When you connect a UVC camera.
+
+* ✅ Check USB Bus: `lsusb`
+
+* Look for something like: 
++
+[source,text]
+--
+Bus 001 Device 005: ID 0c45:6366 Microdia Webcam Vitade AF
+--
+
+* ✅ Find Video Node: `v4l2-ctl --list-devices`
++
+[source,text]
+----
+vsi_v4l2dec (platform:vsi_v4l2dec):
+        /dev/video1
+
+vsi_v4l2enc (platform:vsi_v4l2enc):
+        /dev/video0
+
+USB Camera: USB Camera (usb-xhci-hcd.1.auto-1.2):
+        /dev/video2
+        /dev/video3
+        /dev/media0
+----
+
+=== 🔐 2. Permissions and Access Control
+
+* By default, `/dev/video*` may be owned by root or video group.
+* Fix permission via `udev` or group access:
++
+[source,shell]
+----
+By default:
+    $ groups $USER
+    root
+After changing to user:
+    $ usermod -aG video $USER
+confirm permission:
+    $ groups $USER
+    video root
+----
+
+* Then reload
++
+`udevadm control --reload-rules && udevadm trigger`
+
+== 🔐 Permissions and Udev Rules
+
+=== Default Device Ownership
+
+* When a UVC device is connected, Linux creates a node like:
++
+`/dev/videox`
+
+* By default:
++
+[source,shell]
+----
+ls -l /dev/video2
+crw-rw---- 1 root video 81, 0 Jun 24 10:23 /dev/video2
+----
++
+This means:
+[source,shell]
+----
+    . Owner: root
+    . Group: video
+    . Permissions: Only root and users in video group can access it.
+----
+
+=== 👥 Add User to video Group
+
+* To allow your user account to access the camera:
++
+`sudo usermod -aG video $USER`
+
+* Then 
++
+`newgrp video`
+
+=== ⚙️ Temporary Access (For Debug Only)
+* If needed for a test:
++
+`sudo chmod 666 /dev/video0`
++
+* 🛑 Not recommended in production — all users can now access the camera.
+
+=== 📜 Persistent Access with Udev Rules
+* Udev allows you to define persistent rules to manage device permissions automatically.
+
+* 🧰 Steps to Create a Rule
++
+. Get Vendor & Product ID
+1. Use `lsusb`:
++
+Example: `Bus 001 Device 005: ID **0c45:6366** Microdia USB 2.0 Camera`
+2. Reload Rules and Trigger:
++
+[source,shell]
+----
+udevadm control --reload-rules
+udevadm trigger
+----
+3. Check device
++
+`ls -l /dev/video*`
++
+Example: `crw-rw---- 1 root video 81, 2 Mar  6 09:49 /dev/video`
+
+* Now we can see permission for video.
