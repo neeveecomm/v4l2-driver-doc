@@ -1,0 +1,528 @@
+= V4L2 Simple Application with its IOCTLs
+
+== Opening a V4L2 Device
+
+* Applications access V4L2 devices using standard POSIX system calls:
+
++
+`example: int fd = open("/dev/video0", O_RDWR);`
+
+* *O_RDWR* – required for both read/write and control operations.
+
+.Fails if:
+
+. The device is busy (streaming elsewhere),
+. The node does not exist (e.g., media pipeline misconfigured).
+
+== Querying Device Capabilities
+
+After opening the device, use the `VIDIOC_QUERYCAP` ioctl to retrieve core device capabilities.
+
+[source,c]
+----
+struct v4l2_capability cap;
+ioctl(fd, VIDIOC_QUERYCAP, &cap);
+----
+
+Key fields:
+
+. `cap.driver`: Kernel driver name (e.g., `"mxc-isi-capture"`)
+. `cap.card`: Human-readable card name
+. `cap.bus_info`: Bus location (e.g., `"platform:isi-capture"`)
+. `cap.capabilities`: Capability flags (e.g., `V4L2_CAP_VIDEO_CAPTURE`, `V4L2_CAP_STREAMING`)
+
+To query the video device capabilities, use the following command:
+
+[source,shell]
+----
+$ v4l2-ctl -d /dev/video2 --all
+----
+
+Example output:
+
+[source,txt]
+----
+Driver Info:
+        Driver name      : uvcvideo
+        Card type        : USB Camera: USB Camera
+        Bus info         : usb-xhci-hcd.1.auto-1.2
+        Driver version   : 6.6.84
+        Capabilities     : 0x84a00001
+                Video Capture
+                Metadata Capture
+                Streaming
+                Extended Pix Format
+                Device Capabilities
+        Device Caps      : 0x04200001
+                Video Capture
+                Streaming
+                Extended Pix Format
+Media Driver Info:
+        Driver name      : uvcvideo
+        Model            : USB Camera: USB Camera
+        Serial           : SN0001
+        Bus info         : usb-xhci-hcd.1.auto-1.2
+        Media version    : 6.6.84
+        Hardware revision: 0x00000100 (256)
+        Driver version   : 6.6.84
+Interface Info:
+        ID               : 0x03000002
+        Type             : V4L Video
+Entity Info:
+        ID               : 0x00000001 (1)
+        Name             : USB Camera: USB Camera
+        Function         : V4L2 I/O
+        Flags            : default
+        Pad 0x01000007   : 0: Sink
+          Link 0x02000010: from remote pad 0x100000a of entity 'Extension 3' (Video Pixel Formatter): Data, Enabled, Immutable
+Priority: 2
+Video input : 0 (Camera 1: ok)
+Format Video Capture:
+        Width/Height      : 1280/720
+        Pixel Format      : 'MJPG' (Motion-JPEG)
+        Field             : None
+        Bytes per Line    : 0
+        Size Image        : 1843789
+        Colorspace        : sRGB
+        Transfer Function : Default (maps to sRGB)
+        YCbCr/HSV Encoding: Default (maps to ITU-R 601)
+        Quantization      : Default (maps to Full Range)
+        Flags             : 
+Crop Capability Video Capture:
+        Bounds      : Left 0, Top 0, Width 1280, Height 720
+        Default     : Left 0, Top 0, Width 1280, Height 720
+        Pixel Aspect: 1/1
+Selection Video Capture: crop_default, Left 0, Top 0, Width 1280, Height 720, Flags: 
+Selection Video Capture: crop_bounds, Left 0, Top 0, Width 1280, Height 720, Flags: 
+Streaming Parameters Video Capture:
+        Capabilities     : timeperframe
+        Frames per second: 25.000 (25/1)
+        Read buffers     : 0
+
+User Controls
+
+                     brightness 0x00980900 (int)    : min=-64 max=64 step=1 default=0 value=0
+                       contrast 0x00980901 (int)    : min=0 max=64 step=1 default=32 value=32
+                     saturation 0x00980902 (int)    : min=0 max=128 step=1 default=67 value=67
+                            hue 0x00980903 (int)    : min=-40 max=40 step=1 default=0 value=0
+        white_balance_automatic 0x0098090c (bool)   : default=1 value=1
+                          gamma 0x00980910 (int)    : min=72 max=500 step=1 default=100 value=100
+                           gain 0x00980913 (int)    : min=0 max=100 step=1 default=0 value=0
+           power_line_frequency 0x00980918 (menu)   : min=0 max=2 default=1 value=1 (50 Hz)
+                                0: Disabled
+                                1: 50 Hz
+                                2: 60 Hz
+      white_balance_temperature 0x0098091a (int)    : min=2800 max=6500 step=1 default=4600 value=4600 flags=inactive
+                      sharpness 0x0098091b (int)    : min=0 max=6 step=1 default=3 value=3
+         backlight_compensation 0x0098091c (int)    : min=0 max=2 step=1 default=1 value=1
+
+Camera Controls
+
+                  auto_exposure 0x009a0901 (menu)   : min=0 max=3 default=3 value=3 (Aperture Priority Mode)
+                                1: Manual Mode
+                                3: Aperture Priority Mode
+         exposure_time_absolute 0x009a0902 (int)    : min=1 max=5000 step=1 default=157 value=157 flags=inactive
+     exposure_dynamic_framerate 0x009a0903 (bool)   : default=0 value=1
+----
+
+Shows
+
+. Driver Info
+. Media Driver Info
+. Interface Info
+. Entity Info.
+. Priority.
+. Video input .
+. Format Video Capture.
+. Crop Capability Video Capture.
+. User Controls.
+. Camera Controls.
+
+== Configuring the Video Format
+
+Before capturing or streaming video frames, the application must configure
+
+* Pixel format (e.g., YUYV, MJPEG)
+* Resolution (e.g., 1280x720)
+* Field type (progressive or interlaced)
+* Color space (optional)
+
+=== Setting Format with VIDIOC_S_FMT
+
+[source,shell]
+----
+struct v4l2_format fmt;
+memset(&fmt, 0, sizeof(fmt));
+
+fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+fmt.fmt.pix.width = 1280;
+fmt.fmt.pix.height = 720;
+fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+fmt.fmt.pix.field = V4L2_FIELD_NONE;  // progressive
+
+ioctl(fd, VIDIOC_S_FMT, &fmt);
+----
+
+* The driver may adjust width/height to match hardware constraints.
+* Always follow up with VIDIOC_G_FMT to check actual format.
+
+=== Validating Format with VIDIOC_G_FMT
+[source,shell]
+----
+ioctl(fd, VIDIOC_G_FMT, &fmt);
+printf("Using %dx%d, format: %4.4s\n",
+        fmt.fmt.pix.width, fmt.fmt.pix.height,
+        (char*)&fmt.fmt.pix.pixelformat);
+----
+
+This confirms
+
+. Final resolution
+. Negotiated pixel format
+. Buffer stride and size
+
+=== Pixel Formats (Examples):-
+
+|===
+| *Format Code*          | *Description*
+| `V4L2_PIX_FMT_YUYV`  | Packed YUV 4:2:2
+| `V4L2_PIX_FMT_MJPEG` | Motion JPEG
+| `V4L2_PIX_FMT_NV12`  | Semi-planar YUV 4:2:0
+| `V4L2_PIX_FMT_H264`  | Compressed H.264
+|===
+
+Note: Use *VIDIOC_ENUM_FMT* to get driver-supported formats.
+
+=== Tools and commands
+
+|===
+| **Action**                 | **Command**
+
+| List all video devices     | `v4l2-ctl --list-devices`
+| Query capabilities         | `v4l2-ctl -d /dev/videox --all`
+| List supported formats     | `v4l2-ctl -d /dev/videox --list-formats-ext`
+| Set format                 | `v4l2-ctl -d /dev/videox --set-fmt-video=width=1280,height=720,pixelformat=YUYV`
+| Capture 100 frames to file | `v4l2-ctl -d /dev/videox --stream-mmap --stream-count=100 --stream-to=video.raw`
+| Preview stream (with GUI)  | `gst-launch-1.0 v4l2src device=/dev/videox ! videoconvert ! autovideosink`
+|===
+
+Notes:
+
+|===
+| **Point**                | **Detail**
+
+| Media Graph              | Fully pre-linked and immutable for UVC devices
+| Manual Linking Required? | ❌ No — UVC topology is fixed
+| Sub-devices in Control   | `Camera 1`, `Processing 2`, `Extension 3` are UVC internals
+| Media Controller Role    | Read-only in this case — useful for graph inspection only
+| Device Tree Involvement  | ❌ Not applicable (handled via USB enumeration)
+|===
+
+== Buffer Allocation and Management
+
+=== Overview
+* After configuring the video format (`VIDIOC_S_FMT`), the next step in a V4L2 capture pipeline is buffer management:
++
+--
+  * Allocate buffers
+  * Enqueue them to the driver
+  * Start streaming
+  * Dequeue filled buffers for processing
+--
+
+=== Step-by-Step Buffer Lifecycle (Using mmap() I/O)
+
+. Request Buffers
++
+[source,c]
+----
+struct v4l2_requestbuffers req = {
+    .count = 4,
+    .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+    .memory = V4L2_MEMORY_MMAP
+};
+
+ioctl(fd, VIDIOC_REQBUFS, &req);
+----
++
+--
+* Requests buffer allocation in kernel space
+* `count` is the minimum number of desired buffers
+* `V4L2_MEMORY_MMAP` means user-space will `mmap()` them later
+--
+. Map Buffers to User-space
++
+Loop through all buffers and use `VIDIOC_QUERYBUF` + `mmap()`:
++
+[source,c]
+----
+struct buffer {
+    void   *start;
+    size_t length;
+} buffers[4];
+
+for (int i = 0; i < req.count; ++i) {
+    struct v4l2_buffer buf = {
+        .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .memory = V4L2_MEMORY_MMAP,
+        .index = i
+    };
+
+    ioctl(fd, VIDIOC_QUERYBUF, &buf);
+
+    buffers[i].length = buf.length;
+    buffers[i].start = mmap(NULL, buf.length, PROT_READ | PROT_WRITE,
+                            MAP_SHARED, fd, buf.m.offset);
+}
+----
+. Enqueue Buffers
++
+All buffers must be queued before streaming begins.
++
+[source,c]
+----
+for (int i = 0; i < req.count; ++i) {
+    struct v4l2_buffer buf = {
+        .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .memory = V4L2_MEMORY_MMAP,
+        .index = i
+    };
+    ioctl(fd, VIDIOC_QBUF, &buf);
+}
+----
+.  Start Streaming
++
+[source,c]
+----
+int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+ioctl(fd, VIDIOC_STREAMON, &type);
+----
+. Capture Loop (Dequeue/Process/Enqueue)
++
+[source,c]
+----
+struct v4l2_buffer buf = {
+    .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+    .memory = V4L2_MEMORY_MMAP
+};
+
+while (1) {
+    ioctl(fd, VIDIOC_DQBUF, &buf); // Get filled buffer
+
+    process_frame(buffers[buf.index].start, buf.bytesused);
+
+    ioctl(fd, VIDIOC_QBUF, &buf);  // Requeue for reuse
+}
+----
+* *Summary*
++
+|===
+| Step | Action
+| 1  | `VIDIOC_REQBUFS` – Request kernel buffers
+| 2  | `VIDIOC_QUERYBUF` + `mmap()` – Map them to user-space
+| 3  | `VIDIOC_QBUF` – Enqueue buffers
+| 4  | `VIDIOC_STREAMON` – Start video streaming
+| 5  | Capture loop: `DQBUF → Process → QBUF`
+|===
+
+* *Buffer I/O Methods Comparison*
++
+|===
+| **Method** | **Memory Location**          | **Zero-Copy**   | **Use Case**
+| `read()`   | Internal kernel buffer       | ❌               | Simple, inefficient
+| `mmap()`   | Kernel buffer mapped to user | ✅               | Most commonly used
+| `userptr`  | User allocates memory        | ✅ (if DMA-safe) | For tightly controlled memory regions
+| `dmabuf`   | Shared DMA buffer via FD     | ✅✅              | GPU/VPU interop, zero-copy pipelines
+|===
+
+* *Debug with `v4l2-ctl`*
++
+[source,c]
+----
+root@verdin-imx8mp-15230112:~# v4l2-ctl -d /dev/video2 --stream-mmap --stream-count=100 --stream-to=video.raw
+<<<<<<<<<<< 10.87 fps, dropped buffers: 1
+<<<<<<<<<<<<<<<<< 13.78 fps
+<<<<<<<<<<<<<<<<< 14.74 fps
+<<<<<<<<<<<<<<<< 15.22 fps
+<<<<<<<<<<<<<<<<< 15.51 fps
+<<<<<<<<<<<<<<<<< 15.71 fps
+<<<<<
+root@verdin-imx8mp-15230112:~# ls -l video.raw 
+-rw-r--r-- 1 root root 7508872 Mar  6 02:49 video.raw
+root@verdin-imx8mp-15230112:~# 
+----
+
+== Capturing and Processing Video Frames
+
+=== Objective
+
+This section explains how to capture and handle video frames using the V4L2 streaming interface once the buffers are allocated via mmap() (or other I/O modes).
+
+About this section :
+----
+    * How to dequeue filled buffers from the driver
+    * How to process frame data
+    * How to requeue buffers for continuous capture
+    * How to integrate it with higher-level frameworks (OpenCV, GStreamer, etc.)
+----
+=== V4L2 Streaming Flow (Loop Overview)
+
+Once the stream is started with VIDIOC_STREAMON, video frames are delivered in a producer-consumer pattern:
+....
++---------------------------+
+|     Kernel Video Driver   |
++-------------+-------------+
+              ↓
+    [VIDIOC_DQBUF] —> Application gets filled frame
+              ↓
+       [Process Frame]
+              ↓
+    [VIDIOC_QBUF] —> Buffer returned to driver
+              ↓
+       Loop repeats...
+....
+=== Streaming Code Example
+
+[source,c]
+----
+struct v4l2_buffer buf;
+memset(&buf, 0, sizeof(buf));
+buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+buf.memory = V4L2_MEMORY_MMAP;
+
+while (1) {
+    // Dequeue a filled buffer
+    ioctl(fd, VIDIOC_DQBUF, &buf);
+
+    // Access the frame
+    void *frame_data = buffers[buf.index].start;
+    size_t frame_size = buf.bytesused;
+
+    // Your frame processing logic
+    process_frame(frame_data, frame_size);
+
+    // Requeue the buffer for reuse
+    ioctl(fd, VIDIOC_QBUF, &buf);
+}
+----
+=== Process_frame() – Custom Frame Handling
+
+[source,c]
+----
+void process_frame(void *data, size_t len) {
+    // Save raw frame to disk
+    FILE *f = fopen("frame.raw", "wb");
+    fwrite(data, len, 1, f);
+    fclose(f);
+
+    // Optional: Image filtering, compression, or display
+}
+----
+
+=== Integration with Other Frameworks
+
+|===
+| Framework     | How to Use                                            | Notes
+
+| OpenCV    | Use `cv::Mat` on raw data from buffer                 | Convert formats if needed (e.g., `YUYV → BGR`)
+| GStreamer | Use `appsink` to grab frames from a pipeline          | Zero-copy possible with `dmabuf`
+| Qt/QML    | Integrate via `QVideoFrame` + `QAbstractVideoSurface` | Ideal for embedded GUI applications
+|===
+
+== Device Controls and Tuning
+
+=== UVC Camera Used on: `/dev/video2`
+
+Listing Available Controls
+
+`$ v4l2-ctl -d /dev/video2 --list-ctrls`
+
+*Output* 
+
+[source,c]
+----
+User Controls
+    brightness               : min=-64 max=64 step=1 default=0 value=0
+    contrast                 : min=0 max=64 step=1 default=32 value=32
+    saturation               : min=0 max=128 step=1 default=67 value=67
+    hue                      : min=-40 max=40 step=1 default=0 value=0
+    white_balance_automatic  : default=1 value=1
+    gamma                    : min=72 max=500 step=1 default=100 value=100
+    gain                     : min=0 max=100 step=1 default=0 value=0
+    power_line_frequency     : [menu] default=1 value=1 (50 Hz)
+    white_balance_temperature: [inactive] min=2800 max=6500 default=4600 value=4600
+    sharpness                : min=0 max=6 step=1 default=3 value=3
+    backlight_compensation   : min=0 max=2 step=1 default=1 value=1
+
+Camera Controls
+    auto_exposure            : [menu] default=3 value=3 (Aperture Priority Mode)
+    exposure_time_absolute   : [inactive] min=1 max=5000 default=157 value=157
+    exposure_dynamic_framerate : default=0 value=1
+----
+
+Getting and Setting a Control
+
+. Get Current Brightness:
++
+`$ v4l2-ctl -d /dev/video2 --get-ctrl brightness`
++
+output : `brightness: 0` 
+
+. Set Brightness :
++
+`$ v4l2-ctl -d /dev/video2 --set-ctrl brightness=64`
++
+after set the brightness we need to confirm
++
+`$ v4l2-ctl -d /dev/video2 --get-ctrl brightness`
++
+output : `brightness: 64`
+
+. Inactive Controls
++
+Some controls like *white_balance_temperature* and *exposure_time_absolute* show:
+
+`flags=inactive`
+
+This means the control is not currently modifiable, often due to:
+
+* A higher-level auto mode (e.g., auto white balance) being enabled
+* Dependency on `auto_exposure = manual` to activate manual exposure
+
+You can switch to manual mode:
+
+`v4l2-ctl -d /dev/video2 --set-ctrl auto_exposure=1`
+
+Then check the value:
+
+`v4l2-ctl -d /dev/video2 --get-ctrl exposure_time_absolute`
+
+Output:
+
+[source,shell]
+----
+User Controls
+
+                     brightness 0x00980900 (int)    : min=-64 max=64 step=1 default=0 value=64
+                       contrast 0x00980901 (int)    : min=0 max=64 step=1 default=32 value=32
+                     saturation 0x00980902 (int)    : min=0 max=128 step=1 default=67 value=67
+                            hue 0x00980903 (int)    : min=-40 max=40 step=1 default=0 value=0
+        white_balance_automatic 0x0098090c (bool)   : default=1 value=1
+                          gamma 0x00980910 (int)    : min=72 max=500 step=1 default=100 value=100
+                           gain 0x00980913 (int)    : min=0 max=100 step=1 default=0 value=0
+           power_line_frequency 0x00980918 (menu)   : min=0 max=2 default=1 value=1 (50 Hz)
+                                0: Disabled
+                                1: 50 Hz
+                                2: 60 Hz
+      white_balance_temperature 0x0098091a (int)    : min=2800 max=6500 step=1 default=4600 value=4600 flags=inactive
+                      sharpness 0x0098091b (int)    : min=0 max=6 step=1 default=3 value=3
+         backlight_compensation 0x0098091c (int)    : min=0 max=2 step=1 default=1 value=1
+
+Camera Controls
+
+                  auto_exposure 0x009a0901 (menu)   : min=0 max=3 default=3 value=1 (Manual Mode)
+                                1: Manual Mode
+                                3: Aperture Priority Mode
+         exposure_time_absolute 0x009a0902 (int)    : min=1 max=5000 step=1 default=157 value=157
+     exposure_dynamic_framerate 0x009a0903 (bool)   : default=0 value=1
+----
