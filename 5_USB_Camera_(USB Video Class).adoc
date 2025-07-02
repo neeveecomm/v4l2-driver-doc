@@ -316,7 +316,24 @@ USB Camera: USB Camera (usb-xhci-hcd.1.auto-1.2):
         /dev/media0
 ----
 
-=== 🔐 2. Permissions and Access Control
+=== 🖼️ 2. Preview Using qv4l2 GUI
+
+* Using Qt
++
+`qv4l2`
++
+This lets you:
++
+[source,shell]
+----
+. Preview the camera
+. Change controls (brightness, contrast)
+. Capture snapshots
+----
++
+Output
+
+=== 🔐 3. Permissions and Access Control
 
 * By default, `/dev/video*` may be owned by root or video group.
 * Fix permission via `udev` or group access:

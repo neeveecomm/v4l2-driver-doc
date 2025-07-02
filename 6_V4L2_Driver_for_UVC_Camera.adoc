@@ -1,0 +1,205 @@
+= V4L2 Driver for UVC Camera
+
+==UVC Control Interface
+
+* Overview
+
+> UVC-compliant devices expose various controls standardized by the USB Video Class spec. These controls are made accessible in Linux via the V4L2 control interface, and managed by the uvcvideo driver.
+
+== ✅ 1. Interfacing UVC with V4L2
+
+. The uvcvideo kernel module acts as the V4L2 bridge driver for USB Video Class devices.
+
+. It parses USB descriptors, registers a `/dev/videoX` node, and maps standard UVC controls to V4L2 control IDs.
+
+. Automatically integrates with the V4L2 core framework and optionally exposes the media controller graph if *CONFIG_MEDIA_CONTROLLER* is enabled.
+
+. V4L2 tools like `v4l2-ctl` and `media-ctl` can interact with these interfaces.
+
+=== 🧩 Types of UVC Controls
+[source,shell]
+
+|===
+| Control Type            | Examples
+| **User Controls**       | Brightness, Contrast, Hue, Gain, Gamma
+| **Camera Controls**     | Auto Exposure, Exposure Time, Focus
+| **Processing Controls** | White Balance, Sharpness, Backlight
+| **Extended Unit (XU)**  | Vendor-specific controls (optional)
+|===
+
+== ✅ 2. Configuring and Using UVC Devices
+
+* Use v4l2-ctl --list-devices to identify your UVC device and node.
+
+* You can query supported formats:
++
+[source,shell]
+----
+v4l2-ctl -d /dev/video2 --list-formats-ext
+----
+
+* Configure capture settings such as resolution and pixel format:
++
+[source,shell]
+----
+v4l2-ctl -d /dev/video2 --set-fmt-video=width=1280,height=720,pixelformat=MJPG
+----
+
+* Set frame rate (if supported):
++
+[source,shell]
+----
+v4l2-ctl -d /dev/videoX --set-parm=30
+----
+
+=== 🖼️ GUI Access: qv4l2
+
+`qv4l2`
+
+* Provides:
+
+. Sliders for all controls
+
+. Format configuration
+
+. Live video preview, etc...
+
+== ✅ 3. Video Capture with UVC Devices
+
+* Capture can be tested via:
+
+. Gstreamer- `gst-launch-1.0 v4l2src device=/dev/video2 ! videoconvert ! autovideosink`
+
+. FFmpeg - `ffmpeg -f v4l2 -i /dev/video2 -vcodec copy output.mkv`
+
+* Applications can use `open()`, `ioctl()`, `mmap()` or `read()` to capture frames programmatically.
+
+* Buffer management is typically done using memory mapping (mmap) or user pointer for efficiency.
+
+== ✅ 4. UVC Control Interface
+
+* To list controls `v4l2-ctl -d /dev/video2 --list-ctrls`
++
+[source,text]
+----
+User Controls
+
+                     brightness 0x00980900 (int)    : min=-64 max=64 step=1 default=0 value=0
+                       contrast 0x00980901 (int)    : min=0 max=64 step=1 default=32 value=32
+                     saturation 0x00980902 (int)    : min=0 max=128 step=1 default=67 value=67
+                            hue 0x00980903 (int)    : min=-40 max=40 step=1 default=0 value=0
+        white_balance_automatic 0x0098090c (bool)   : default=1 value=1
+                          gamma 0x00980910 (int)    : min=72 max=500 step=1 default=100 value=100
+                           gain 0x00980913 (int)    : min=0 max=100 step=1 default=0 value=0
+           power_line_frequency 0x00980918 (menu)   : min=0 max=2 default=1 value=1 (50 Hz)
+      white_balance_temperature 0x0098091a (int)    : min=2800 max=6500 step=1 default=4600 value=4600 flags=inactive
+                      sharpness 0x0098091b (int)    : min=0 max=6 step=1 default=3 value=3
+         backlight_compensation 0x0098091c (int)    : min=0 max=2 step=1 default=1 value=1
+
+Camera Controls
+
+                  auto_exposure 0x009a0901 (menu)   : min=0 max=3 default=3 value=3 (Aperture Priority Mode)
+         exposure_time_absolute 0x009a0902 (int)    : min=1 max=5000 step=1 default=157 value=157 flags=inactive
+     exposure_dynamic_framerate 0x009a0903 (bool)   : default=0 value=1
+----
+
+* Configure capture settings such as resolution and pixel format: 
++
+[source,shell]
+----
+v4l2-ctl -d /dev/video2 --set-fmt-video=width=1280,height=720,pixelformat=MJPG
+----
+
+* Set frame rate (if supported):
++
+[source,shell]
+----
+v4l2-ctl -d /dev/video2 --set-parm=30
+----
+
+* GUI usage via `qv4l2` for live preview and tuning.
+
+=== 🎛️ Change a Control Value
+
+* To change controls `v4l2-ctl -d /dev/video2 --set-ctrl brightness=50`
+* To verify `v4l2-ctl -d /dev/video2 --get-ctrl brightness`
++
+Output
++
+`brightness: 50`
+
+=== 🧠 Advanced: Menu Controls & Flags
+
+* Some controls (like power_line_frequency) are menu-based:
+
+`v4l2-ctl --list-ctrls-menu -d /dev/video2`
+
+[source,shell]
+----
+User Controls
+
+                     brightness 0x00980900 (int)    : min=-64 max=64 step=1 default=0 value=50
+                       contrast 0x00980901 (int)    : min=0 max=64 step=1 default=32 value=32
+                     saturation 0x00980902 (int)    : min=0 max=128 step=1 default=67 value=67
+                            hue 0x00980903 (int)    : min=-40 max=40 step=1 default=0 value=0
+        white_balance_automatic 0x0098090c (bool)   : default=1 value=1
+                          gamma 0x00980910 (int)    : min=72 max=500 step=1 default=100 value=100
+                           gain 0x00980913 (int)    : min=0 max=100 step=1 default=0 value=0
+           power_line_frequency 0x00980918 (menu)   : min=0 max=2 default=1 value=1 (50 Hz)
+                                0: Disabled
+                                1: 50 Hz
+                                2: 60 Hz
+      white_balance_temperature 0x0098091a (int)    : min=2800 max=6500 step=1 default=4600 value=4600 flags=inactive
+                      sharpness 0x0098091b (int)    : min=0 max=6 step=1 default=3 value=3
+         backlight_compensation 0x0098091c (int)    : min=0 max=2 step=1 default=1 value=1
+
+Camera Controls
+
+                  auto_exposure 0x009a0901 (menu)   : min=0 max=3 default=3 value=3 (Aperture Priority Mode)
+                                1: Manual Mode
+                                3: Aperture Priority Mode
+         exposure_time_absolute 0x009a0902 (int)    : min=1 max=5000 step=1 default=157 value=157 flags=inactive
+     exposure_dynamic_framerate 0x009a0903 (bool)   : default=0 value=1
+----
+
+[source,text]
+--
+Example:
+power_line_frequency 0x00980918 (menu)   : min=0 max=2 default=1 value=1 (50 Hz)
+  0: Disabled
+  1: 50 Hz
+  2: 60 Hz
+--
+
+* Also, notice:
+
+. flags=inactive: control is disabled (e.g., manual exposure requires auto-exposure to be off)
+
+. Control ranges, step size, and default values are driver-provided
+
+=== 🧪 Tip: Handling Inactive Controls
+* If a control shows `flags=inactive` , you must disable its corresponding automatic control.
+
+Example: Manual white balance
+
+[source,c]
+----
+v4l2-ctl -d /dev/video2 --set-ctrl white_balance_automatic=0
+v4l2-ctl -d /dev/video2 --set-ctrl white_balance_temperature=5000
+----
+
+== ✅ 5. Extended UVC Controls (XU Controls) Overview
+
+* XU Controls allow vendor-specific control extensions (e.g., HDR toggle, IR filter, privacy shutter).
+
+* Located in the USB Video Class descriptor as Extension Units (XUs) with unique GUIDs.
+
+* May not always be named — may appear as hex IDs in v4l2-ctl unless properly mapped.
+
+* Access:
+
+. Via v4l2-ctl if exposed
+
+. Via raw IOCTLs (UVCIOC_CTRL_QUERY) in custom user apps
+
+* Advanced tools or patches may be required to expose undocumented XUs (e.g., Logitech, Intel RealSense).
